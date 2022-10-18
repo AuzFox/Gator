@@ -29,7 +29,6 @@ class GatorEntityProperty extends Reference:
 class GatorEntityObject extends Reference:
 	var name: String
 	var entity_tag: String
-	var type: String
 	var properties_uuid_map: Dictionary
 	var properties: Dictionary
 	var is_valid: bool
@@ -37,16 +36,12 @@ class GatorEntityObject extends Reference:
 	func _init(name: String) -> void:
 		self.name = name
 		self.entity_tag = ""
-		self.type = "scene"
 		self.properties_uuid_map = {}
 		self.properties = {}
 		self.is_valid = true
 	
 	func is_tag_valid() -> bool:
 		return self.is_valid && self.entity_tag != ""
-	
-	func is_type_valid() -> bool:
-		return self.is_valid && (self.type == "scene" || self.type == "ignore" || self.type == "empty")
 	
 	func get_property_from_uuid(uuid: String) -> GatorEntityProperty:
 		return properties[properties_uuid_map[uuid]]
@@ -61,13 +56,6 @@ class GatorEntityObject extends Reference:
 					return
 				else:
 					print("gt_tag is not a string")
-					self.is_valid = false
-			elif pname == "gt_type":
-				if data["valueType"] == "string":
-					self.type = data["value"]
-					return
-				else:
-					print("gt_type is not a string")
 					self.is_valid = false
 		
 		properties_uuid_map[data["uuid"]] = pname
@@ -140,10 +128,6 @@ func build() -> bool:
 			print("bad tag")
 			return false
 		
-		if !obj.is_type_valid():
-			print("bad type")
-			return false
-		
 		for raw_instance in raw_obj["instances"]:
 			var instance: GatorEntityInstance = GatorEntityInstance.new(
 				raw_instance["name"],
@@ -163,7 +147,13 @@ func build() -> bool:
 		if scene == null:
 			var obj: GatorEntityObject = instance.object.get_ref()
 			var entity_def: GatorEntityDefinition = entity_collection.entity_definitions[tag_map[obj.entity_tag]]
-			var new_scene = entity_def.scene.instance()
+			var new_scene
+			
+			if entity_def.entity_type == GatorEntityDefinition.EntityType.SCENE:
+				new_scene = entity_def.scene.instance()
+			else:
+				new_scene = Spatial.new()
+			
 			new_scene.name = instance.name
 			scene = new_scene
 			instance.scene = weakref(new_scene)
@@ -176,7 +166,13 @@ func build() -> bool:
 			if parent_scene == null:
 				var obj: GatorEntityObject = parent.object.get_ref()
 				var entity_def: GatorEntityDefinition = entity_collection.entity_definitions[tag_map[obj.entity_tag]]
-				var new_scene = entity_def.scene.instance()
+				var new_scene
+				
+				if entity_def.entity_type == GatorEntityDefinition.EntityType.SCENE:
+					new_scene = entity_def.scene.instance()
+				else:
+					new_scene = Spatial.new()
+				
 				new_scene.name = parent.name
 				parent_scene = new_scene
 				parent.scene = weakref(new_scene)
