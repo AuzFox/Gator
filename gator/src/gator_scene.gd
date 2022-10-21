@@ -19,18 +19,14 @@ class GatorEntityProperty extends Reference:
 		self.value = data["value"]
 		
 		if self.valueType == "string":
-			if self.value.begins_with("Vector3(") || self.value.begins_with("Vector2("):
-				self.value = str2var(self.value)
-			elif self.value == "true":
-				self.value = true
-			elif self.value == "false":
-				self.value = false
+			self.value = str2var(self.value)
 
 class GatorEntityObject extends Reference:
 	var name: String
 	var entity_tag: String
 	var properties_uuid_map: Dictionary
 	var properties: Dictionary
+	var ignore: bool
 	var is_valid: bool
 	
 	func _init(name: String) -> void:
@@ -38,6 +34,7 @@ class GatorEntityObject extends Reference:
 		self.entity_tag = ""
 		self.properties_uuid_map = {}
 		self.properties = {}
+		self.ignore = false
 		self.is_valid = true
 	
 	func is_tag_valid() -> bool:
@@ -50,13 +47,17 @@ class GatorEntityObject extends Reference:
 		var pname: String = data["name"]
 		
 		if data["type"] == "object":
-			if pname == "gt_tag":
+			if pname == "gt-tag":
 				if data["valueType"] == "string":
 					self.entity_tag = data["value"]
-					return
 				else:
-					print("gt_tag is not a string")
+					printerr("Gator: Object \"%s\" property \"gt-tag\" must be a string" % self.name)
 					self.is_valid = false
+				return
+			elif pname == "gt-ignore":
+				self.entity_tag = "gt-ignore"
+				self.ignore = true
+				return
 		
 		properties_uuid_map[data["uuid"]] = pname
 		properties[pname] = GatorEntityProperty.new(pname, data)
@@ -92,6 +93,10 @@ class GatorEntityInstance extends Reference:
 	
 	func set_properties(tag_map: Dictionary, entity_collection: GatorEntityCollection, data: Dictionary) -> void:
 		var obj: GatorEntityObject = self.object.get_ref() as GatorEntityObject
+		if obj.ignore:
+			self.properties = {}
+			return
+		
 		var entity_def: GatorEntityDefinition = entity_collection.entity_definitions[tag_map[obj.entity_tag]]
 		
 		self.properties = entity_def.properties.duplicate(true)
@@ -108,7 +113,7 @@ func build() -> bool:
 		tag_map[def.entity_tag] = i
 	
 	if tag_map.empty():
-		printerr("Gator: entity_collection is empty")
+		printerr("Gator: Entity collection is empty")
 		return false
 	
 	var raw_data: Dictionary = _extract_json_data()
@@ -125,7 +130,7 @@ func build() -> bool:
 			obj.add_property(raw_property)
 		
 		if !obj.is_tag_valid():
-			print("bad tag")
+			printerr("Gator: Object \"%s\" has an invalid or missing \"gt-tag\" property\n\tCrocotile3D objects must be given a \"gt-tag\" or \"gt-ignore\" object property" % obj.name)
 			return false
 		
 		for raw_instance in raw_obj["instances"]:
@@ -145,18 +150,7 @@ func build() -> bool:
 		# create this instance if it doesn't exist already
 		var scene = instance.scene.get_ref()
 		if scene == null:
-			var obj: GatorEntityObject = instance.object.get_ref()
-			var entity_def: GatorEntityDefinition = entity_collection.entity_definitions[tag_map[obj.entity_tag]]
-			var new_scene
-			
-			if entity_def.entity_type == GatorEntityDefinition.EntityType.SCENE:
-				new_scene = entity_def.scene.instance()
-			else:
-				new_scene = Spatial.new()
-			
-			new_scene.name = instance.name
-			scene = new_scene
-			instance.scene = weakref(new_scene)
+			scene = _spawn_instance(tag_map, instance)
 		
 		# instance parent (if needed), then add current instance as a child
 		if instance.parent_uuid != "null":
@@ -164,34 +158,48 @@ func build() -> bool:
 			var parent_scene = parent.scene.get_ref()
 			
 			if parent_scene == null:
-				var obj: GatorEntityObject = parent.object.get_ref()
-				var entity_def: GatorEntityDefinition = entity_collection.entity_definitions[tag_map[obj.entity_tag]]
-				var new_scene
-				
-				if entity_def.entity_type == GatorEntityDefinition.EntityType.SCENE:
-					new_scene = entity_def.scene.instance()
-				else:
-					new_scene = Spatial.new()
-				
-				new_scene.name = parent.name
-				parent_scene = new_scene
-				parent.scene = weakref(new_scene)
+				parent_scene = _spawn_instance(tag_map, parent)
 			
 			parent_scene.add_child(scene)
 			scene.owner = get_tree().edited_scene_root
-		else:
+		elif scene:
 			add_child(scene)
 			scene.owner = get_tree().edited_scene_root
 		
 		# set properties
-		if scene is Spatial:
-			scene.global_translation = instance.pos * scene_scale
-			scene.global_rotation = instance.rot
-
-		if "properties" in scene:
-			scene.properties = instance.properties
+		if scene:
+			if scene is Spatial:
+				scene.global_translation = instance.pos * scene_scale
+				scene.global_rotation = instance.rot
+			
+			if "properties" in scene:
+				scene.properties = instance.properties
 	
 	return true
+
+func _spawn_instance(tag_map: Dictionary, instance: GatorEntityInstance):
+	var obj: GatorEntityObject = instance.object.get_ref()
+	var new_scene
+	
+	if obj.ignore:
+		if instance.parent_uuid != "null":
+			new_scene = Spatial.new()
+			new_scene.name = "! ignored object !"
+			instance.scene = weakref(new_scene)
+			return new_scene
+		else:
+			return null
+	
+	var entity_def: GatorEntityDefinition = entity_collection.entity_definitions[tag_map[obj.entity_tag]]
+	
+	if entity_def.entity_type == GatorEntityDefinition.EntityType.SCENE:
+		new_scene = entity_def.scene.instance()
+	else:
+		new_scene = Spatial.new()
+	
+	new_scene.name = instance.name
+	instance.scene = weakref(new_scene)
+	return new_scene
 
 func _free_children() -> void:
 	for child in get_children():
