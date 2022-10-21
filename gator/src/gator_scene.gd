@@ -130,8 +130,8 @@ func build() -> bool:
 			obj.add_property(raw_property)
 		
 		if !obj.is_tag_valid():
-			printerr("Gator: Object \"%s\" has an invalid or missing \"gt-tag\" property\n\tCrocotile3D objects must be given a \"gt-tag\" or \"gt-ignore\" object property" % obj.name)
-			return false
+			obj.ignore = true
+			obj.entity_tag = "gt-ignore"
 		
 		for raw_instance in raw_obj["instances"]:
 			var instance: GatorEntityInstance = GatorEntityInstance.new(
