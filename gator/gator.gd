@@ -30,17 +30,12 @@ func _exit_tree():
 func create_gator_scene_controls() -> Control:
 	var separator = VSeparator.new()
 
-	#var icon = TextureRect.new()
-	#icon.texture = preload("res://addons/qodot/icons/icon_qodot_spatial.svg")
-	#icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-
 	var build_button = ToolButton.new()
 	build_button.text = "Build"
 	build_button.connect("pressed", self, "build_gator_scene")
 
 	var control = HBoxContainer.new()
 	control.add_child(separator)
-	#control.add_child(icon)
 	control.add_child(build_button)
 	
 	return control
@@ -61,7 +56,6 @@ func build_gator_scene() -> void:
 	if !(edited_object is GatorScene):
 		return
 	
-	#disable_gator_scene_controls(true)
 	print("Building %s..." % edited_object.data_file)
 	if edited_object.build():
 		print("Done")

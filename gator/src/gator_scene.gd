@@ -27,7 +27,6 @@ class GatorEntityObject extends Reference:
 	var properties_uuid_map: Dictionary
 	var properties: Dictionary
 	var ignore: bool
-	var is_valid: bool
 	
 	func _init(name: String) -> void:
 		self.name = name
@@ -35,10 +34,10 @@ class GatorEntityObject extends Reference:
 		self.properties_uuid_map = {}
 		self.properties = {}
 		self.ignore = false
-		self.is_valid = true
 	
-	func is_tag_valid() -> bool:
-		return self.is_valid && self.entity_tag != ""
+	func set_ignored() -> void:
+		self.entity_tag = "gt-ignore"
+		self.ignore = true
 	
 	func get_property_from_uuid(uuid: String) -> GatorEntityProperty:
 		return properties[properties_uuid_map[uuid]]
@@ -51,12 +50,11 @@ class GatorEntityObject extends Reference:
 				if data["valueType"] == "string":
 					self.entity_tag = data["value"]
 				else:
-					printerr("Gator: Object \"%s\" property \"gt-tag\" must be a string" % self.name)
-					self.is_valid = false
+					printerr("Gator: Object \"%s\" property \"gt-tag\" must be a string. Instances will be ignored" % self.name)
+					self.set_ignored()
 				return
 			elif pname == "gt-ignore":
-				self.entity_tag = "gt-ignore"
-				self.ignore = true
+				self.set_ignored()
 				return
 		
 		properties_uuid_map[data["uuid"]] = pname
@@ -129,9 +127,11 @@ func build() -> bool:
 		for raw_property in raw_obj["custom"]:
 			obj.add_property(raw_property)
 		
-		if !obj.is_tag_valid():
-			obj.ignore = true
-			obj.entity_tag = "gt-ignore"
+		if obj.entity_tag == "":
+			obj.set_ignored()
+		elif !tag_map.has(obj.entity_tag):
+			printerr("Gator: Entity tag \"%s\" on object \"%s\" does not exist in the entity collection. Instances will be ignored" % [obj.entity_tag, obj.name])
+			obj.set_ignored()
 		
 		for raw_instance in raw_obj["instances"]:
 			var instance: GatorEntityInstance = GatorEntityInstance.new(
