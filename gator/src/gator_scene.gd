@@ -2,7 +2,7 @@ tool
 class_name GatorScene
 extends Spatial
 
-export(String, FILE, "*.txt") var data_file: String = ""
+export(String, FILE, GLOBAL, "*.txt") var data_file: String = ""
 export (Resource) var entity_collection
 export var scene_scale: float = 1.0
 
@@ -26,39 +26,41 @@ class GatorEntityObject extends Reference:
 	var entity_tag: String
 	var properties_uuid_map: Dictionary
 	var properties: Dictionary
+	var points: Dictionary
 	var ignore: bool
 	
-	func _init(name: String) -> void:
-		self.name = name
+	func _init(data: Dictionary, scene_scale: float) -> void:
+		self.name = data["name"]
 		self.entity_tag = ""
 		self.properties_uuid_map = {}
 		self.properties = {}
+		self.points = {}
 		self.ignore = false
-	
-	func set_ignored() -> void:
-		self.entity_tag = "gt-ignore"
-		self.ignore = true
+		
+		for raw_property in data["custom"]:
+			var pname: String = raw_property["name"]
+			
+			if raw_property["type"] == "object":
+				if pname == "gt-tag":
+					if raw_property["valueType"] == "string":
+						self.entity_tag = raw_property["value"]
+					else:
+						printerr("Gator: Object \"%s\" property \"gt-tag\" must be a string. Instances will be ignored" % self.name)
+						self.ignore = true
+					continue
+				elif pname == "gt-ignore":
+					self.ignore = true
+					continue
+			
+			self.properties_uuid_map[raw_property["uuid"]] = pname
+			self.properties[pname] = GatorEntityProperty.new(pname, raw_property)
+		
+		for raw_point in data["points"]:
+			var pos: Dictionary = raw_point["pos"]
+			self.points[raw_point["name"]] = Vector3(pos["x"], pos["y"], pos["z"]) * scene_scale
 	
 	func get_property_from_uuid(uuid: String) -> GatorEntityProperty:
-		return properties[properties_uuid_map[uuid]]
-	
-	func add_property(data: Dictionary) -> void:
-		var pname: String = data["name"]
-		
-		if data["type"] == "object":
-			if pname == "gt-tag":
-				if data["valueType"] == "string":
-					self.entity_tag = data["value"]
-				else:
-					printerr("Gator: Object \"%s\" property \"gt-tag\" must be a string. Instances will be ignored" % self.name)
-					self.set_ignored()
-				return
-			elif pname == "gt-ignore":
-				self.set_ignored()
-				return
-		
-		properties_uuid_map[data["uuid"]] = pname
-		properties[pname] = GatorEntityProperty.new(pname, data)
+		return self.properties[self.properties_uuid_map[uuid]]
 
 class GatorEntityInstance extends Reference:
 	var name: String
@@ -70,9 +72,9 @@ class GatorEntityInstance extends Reference:
 	var rot: Vector3
 	var scene: WeakRef
 	
-	func _init(name: String, uuid: String, object: WeakRef, data: Dictionary) -> void:
-		self.name = name
-		self.uuid = uuid
+	func _init(object: WeakRef, data: Dictionary, scene_scale: float) -> void:
+		self.name = data["name"]
+		self.uuid = data["uuid"]
 		self.object = object
 		
 		var raw_parent = data["parent"]
@@ -82,7 +84,7 @@ class GatorEntityInstance extends Reference:
 			self.parent_uuid = raw_parent
 		
 		var raw_pos_rot: Dictionary = data["pos"]
-		self.pos = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"])
+		self.pos = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"]) * scene_scale
 		
 		raw_pos_rot = data["rot"]
 		self.rot = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"])
@@ -122,24 +124,16 @@ func build() -> bool:
 	var entity_objects: Array = []
 	var entity_instances: Dictionary = {}
 	for raw_obj in raw_data["objects"]:
-		var obj: GatorEntityObject = GatorEntityObject.new(raw_obj["name"])
-		
-		for raw_property in raw_obj["custom"]:
-			obj.add_property(raw_property)
+		var obj: GatorEntityObject = GatorEntityObject.new(raw_obj, scene_scale)
 		
 		if obj.entity_tag == "":
-			obj.set_ignored()
+			obj.ignore = true
 		elif !tag_map.has(obj.entity_tag):
 			printerr("Gator: Entity tag \"%s\" on object \"%s\" does not exist in the entity collection. Instances will be ignored" % [obj.entity_tag, obj.name])
-			obj.set_ignored()
+			obj.ignore = true
 		
 		for raw_instance in raw_obj["instances"]:
-			var instance: GatorEntityInstance = GatorEntityInstance.new(
-				raw_instance["name"],
-				raw_instance["uuid"],
-				weakref(obj),
-				raw_instance
-			)
+			var instance: GatorEntityInstance = GatorEntityInstance.new(weakref(obj), raw_instance, scene_scale)
 			instance.set_properties(tag_map, entity_collection as GatorEntityCollection, raw_instance)
 			entity_instances[instance.uuid] = instance
 		
@@ -169,11 +163,14 @@ func build() -> bool:
 		# set properties
 		if scene:
 			if scene is Spatial:
-				scene.global_translation = instance.pos * scene_scale
+				scene.global_translation = instance.pos
 				scene.global_rotation = instance.rot
 			
 			if "properties" in scene:
 				scene.properties = instance.properties
+			
+			if "points" in scene:
+				scene.points = instance.object.get_ref().points.duplicate(true)
 	
 	return true
 
