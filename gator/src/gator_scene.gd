@@ -2,6 +2,9 @@ tool
 class_name GatorScene
 extends Spatial
 
+signal build_success
+signal build_fail
+
 export(String, FILE, GLOBAL, "*.txt") var data_file: String = ""
 export (Resource) var entity_collection
 export var scene_scale: float = 1.0
@@ -104,7 +107,7 @@ class GatorEntityInstance extends Reference:
 			var obj_property: GatorEntityProperty = obj.get_property_from_uuid(raw_property["uuid"])
 			self.properties[obj_property.name] = raw_property["value"]
 
-func build() -> bool:
+func build() -> void:
 	_free_children()
 	
 	var tag_map: Dictionary = {}
@@ -114,11 +117,13 @@ func build() -> bool:
 	
 	if tag_map.empty():
 		printerr("Gator: Entity collection is empty")
-		return false
+		emit_signal("build_fail")
+		return
 	
 	var raw_data: Dictionary = _extract_json_data()
 	if raw_data.empty():
-		return false
+		emit_signal("build_fail")
+		return
 	
 	# extract object and instance data
 	var entity_objects: Array = []
@@ -140,6 +145,7 @@ func build() -> bool:
 		entity_objects.append(obj)
 	
 	# construct scene
+	var toplevel_nodes: Array = []
 	for instance in entity_instances.values():
 		# create this instance if it doesn't exist already
 		var scene = instance.scene.get_ref()
@@ -159,6 +165,7 @@ func build() -> bool:
 		elif scene:
 			add_child(scene)
 			scene.owner = get_tree().edited_scene_root
+			toplevel_nodes.append(scene)
 		
 		# set properties
 		if scene:
@@ -172,7 +179,23 @@ func build() -> bool:
 			if "points" in scene:
 				scene.points = instance.object.get_ref().points.duplicate(true)
 	
-	return true
+	# call _on_build_completed() callbacks
+	var node_stack: Array = []
+	for node in toplevel_nodes:
+		node_stack.append(node)
+		while !node_stack.empty():
+			var current = node_stack.pop_back()
+			var script = current.get_script()
+			
+			if script && script.is_tool() && current.has_method("_on_build_completed"):
+				current._on_build_completed()
+			
+			if current.get_child_count() > 0:
+				var children: Array = current.get_children()
+				children.invert()
+				node_stack.append_array(children)
+	
+	emit_signal("build_success")
 
 func _spawn_instance(tag_map: Dictionary, instance: GatorEntityInstance):
 	var obj: GatorEntityObject = instance.object.get_ref()

@@ -56,8 +56,18 @@ func build_gator_scene() -> void:
 	if !(edited_object is GatorScene):
 		return
 	
+	disable_gator_scene_controls(true)
+	edited_object.connect("build_success", self, "on_build_success", [], CONNECT_ONESHOT)
+	edited_object.connect("build_fail", self, "on_build_fail", [], CONNECT_ONESHOT)
+	
 	print("Building %s..." % edited_object.data_file)
-	if edited_object.build():
-		print("Done")
-	else:
-		printerr("Build failed")
+	
+	edited_object.build()
+
+func on_build_success() -> void:
+	disable_gator_scene_controls(false)
+	print("Done")
+
+func on_build_fail() -> void:
+	disable_gator_scene_controls(false)
+	printerr("Gator: Build failed")
