@@ -2,12 +2,14 @@ tool
 class_name GatorScene
 extends Spatial
 
+signal build_progress
 signal build_success
 signal build_fail
 
 export(String, FILE, GLOBAL, "*.txt") var data_file: String = ""
 export (Resource) var entity_collection
 export var scene_scale: float = 1.0
+export var use_global_origin: bool = false
 
 class GatorEntityProperty extends Reference:
 	var name: String
@@ -75,19 +77,19 @@ class GatorEntityInstance extends Reference:
 	var rot: Vector3
 	var scene: WeakRef
 	
-	func _init(object: WeakRef, data: Dictionary, scene_scale: float) -> void:
+	func _init(object: WeakRef, data: Dictionary) -> void:
 		self.name = data["name"]
 		self.uuid = data["uuid"]
 		self.object = object
 		
 		var raw_parent = data["parent"]
-		if raw_parent == null:
+		if !raw_parent:
 			self.parent_uuid = "null"
 		else:
 			self.parent_uuid = raw_parent
 		
 		var raw_pos_rot: Dictionary = data["pos"]
-		self.pos = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"]) * scene_scale
+		self.pos = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"])
 		
 		raw_pos_rot = data["rot"]
 		self.rot = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"])
@@ -108,6 +110,10 @@ class GatorEntityInstance extends Reference:
 			self.properties[obj_property.name] = raw_property["value"]
 
 func build() -> void:
+	var build_progress: float = 0.0
+	
+	emit_signal("build_progress", build_progress)
+	
 	_free_children()
 	
 	var tag_map: Dictionary = {}
@@ -138,11 +144,15 @@ func build() -> void:
 			obj.ignore = true
 		
 		for raw_instance in raw_obj["instances"]:
-			var instance: GatorEntityInstance = GatorEntityInstance.new(weakref(obj), raw_instance, scene_scale)
+			var instance: GatorEntityInstance = GatorEntityInstance.new(weakref(obj), raw_instance)
 			instance.set_properties(tag_map, entity_collection as GatorEntityCollection, raw_instance)
 			entity_instances[instance.uuid] = instance
 		
 		entity_objects.append(obj)
+	
+	build_progress = 33.0
+	emit_signal("build_progress", build_progress)
+	yield(GatorUtil.idle_frame(self), "timeout")
 	
 	# construct scene
 	var toplevel_nodes: Array = []
@@ -170,14 +180,26 @@ func build() -> void:
 		# set properties
 		if scene:
 			if scene is Spatial:
-				scene.global_translation = instance.pos
-				scene.global_rotation = instance.rot
+				if use_global_origin:
+					if instance.parent_uuid == "null":
+						scene.global_translation = instance.pos * scene_scale
+						scene.global_rotation = instance.rot
+					else:
+						scene.translation = instance.pos * scene_scale
+						scene.rotation = instance.rot
+				else:
+					scene.translation = instance.pos * scene_scale
+					scene.rotation = instance.rot
 			
 			if "properties" in scene:
 				scene.properties = instance.properties
 			
 			if "points" in scene:
 				scene.points = instance.object.get_ref().points.duplicate(true)
+	
+	build_progress = 66.0
+	emit_signal("build_progress", build_progress)
+	yield(GatorUtil.idle_frame(self), "timeout")
 	
 	# call _on_build_completed() callbacks
 	var node_stack: Array = []
