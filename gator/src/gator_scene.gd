@@ -1,26 +1,42 @@
-tool
+@tool
 class_name GatorScene
-extends Spatial
+extends Node3D
 
 signal build_progress
 signal build_success
 signal build_fail
 
-export(String, FILE, GLOBAL, "*.txt") var data_file: String = ""
-export (Resource) var entity_collection
-export var scene_scale: float = 1.0
-export var use_global_origin: bool = false
+enum BuildMode {DATA, CROCOTILE}
+enum EntityType {SCENE, EMPTY, IGNORE}
 
-var entity_objects: Array = []
-var entity_instances: Dictionary = {}
-var toplevel_nodes: Array = []
-var instances_to_keep: Array = []
+@export_global_file("*.txt, *.TXT, *.crocotile, *.CROCOTILE") var data_file: String = ""
+@export var entity_collection: Resource
+@export var scene_scale: float = 1.0
+@export var use_global_origin: bool = false
 
-class GatorEntityProperty extends Reference:
+class GatorBuildContext extends RefCounted:
+	var build_mode: BuildMode
+	var entity_objects: Array[GatorObject]
+	var entity_instances: Dictionary
+	var toplevel_nodes: Array[Node]
+	var instances_to_keep: Array[GatorInstance]
+	var json_data: Dictionary
+	var tag_map: Dictionary
+	
+	func _init():
+		self.build_mode = BuildMode.DATA
+		self.entity_objects = []
+		self.entity_instances = {}
+		self.toplevel_nodes = []
+		self.instances_to_keep = []
+		self.json_data = {}
+		self.tag_map = {}
+
+class GatorProperty extends RefCounted:
 	var name: String
 	var type: String
 	var valueType: String
-	var value
+	var value: Variant
 	
 	func _init(name: String, data: Dictionary) -> void:
 		self.name = name
@@ -29,20 +45,18 @@ class GatorEntityProperty extends Reference:
 		self.value = data["value"]
 		
 		if self.valueType == "string":
-			self.value = str2var(self.value)
+			self.value = str_to_var(self.value)
 
-class GatorEntityObject extends Reference:
-	enum EntityType {SCENE, EMPTY, IGNORE}
-	
+class GatorObject extends RefCounted:
 	var name: String
 	var entity_tag: String
 	var entity_def: WeakRef
-	var entity_type: int # EntityType value
+	var entity_type: EntityType
 	var properties_uuid_map: Dictionary
 	var properties: Dictionary
 	var points: Dictionary
 	
-	func _init(tag_map: Dictionary, data: Dictionary, scene_scale: float) -> void:
+	func _init(ctx: GatorBuildContext, data: Dictionary, scene_scale: float) -> void:
 		self.name = data["name"]
 		self.entity_tag = ""
 		self.entity_def = weakref(null)
@@ -51,7 +65,14 @@ class GatorEntityObject extends Reference:
 		self.properties = {}
 		self.points = {}
 		
-		for raw_property in data["custom"]:
+		var raw_properties: Array
+		match ctx.build_mode:
+			BuildMode.DATA:
+				raw_properties = data["custom"]
+			BuildMode.CROCOTILE:
+				raw_properties = data["properties"]["custom"]
+		
+		for raw_property in raw_properties:
 			var pname: String = raw_property["name"]
 			
 			if raw_property["type"] == "object":
@@ -70,11 +91,11 @@ class GatorEntityObject extends Reference:
 					continue
 			
 			self.properties_uuid_map[raw_property["uuid"]] = pname
-			self.properties[pname] = GatorEntityProperty.new(pname, raw_property)
+			self.properties[pname] = GatorProperty.new(pname, raw_property)
 		
 		if self.entity_type == EntityType.SCENE:
-			if tag_map.has(self.entity_tag):
-				self.entity_def = weakref(tag_map[self.entity_tag])
+			if ctx.tag_map.has(self.entity_tag):
+				self.entity_def = weakref(ctx.tag_map[self.entity_tag])
 			else:
 				printerr("Gator: Entity tag \"%s\" on object \"%s\" does not exist in the entity collection. Instances will be ignored" % [self.entity_tag, self.name])
 				self.entity_type = EntityType.IGNORE
@@ -83,10 +104,10 @@ class GatorEntityObject extends Reference:
 			var pos: Dictionary = raw_point["pos"]
 			self.points[raw_point["name"]] = Vector3(pos["x"], pos["y"], pos["z"]) * scene_scale
 	
-	func get_property_from_uuid(uuid: String) -> GatorEntityProperty:
+	func get_property_from_uuid(uuid: String) -> GatorProperty:
 		return self.properties[self.properties_uuid_map[uuid]]
 
-class GatorEntityInstance extends Reference:
+class GatorInstance extends RefCounted:
 	var name: String
 	var uuid: String
 	var object: WeakRef
@@ -97,141 +118,208 @@ class GatorEntityInstance extends Reference:
 	var scene: WeakRef
 	var keep: bool
 	
-	func _init(object: WeakRef, data: Dictionary) -> void:
-		self.name = data["name"]
-		self.uuid = data["uuid"]
-		self.object = object
+	func _init(ctx: GatorBuildContext, object: WeakRef, data: Dictionary) -> void:
+		var uuid_tag: String
+		var parent_uuid_tag: String
+		var pos_tag: String
+		var rot_tag: String
+		var rot_x_tag: String
+		var rot_y_tag: String
+		var rot_z_tag: String
+		var raw_properties: Array
 		
-		var raw_parent = data["parent"]
-		if !raw_parent:
+		# common initialization
+		self.name = data["name"]
+		self.object = object
+		self.scene = weakref(null)
+		self.keep = self.object.get_ref().entity_type != EntityType.IGNORE
+		
+		# .crocotile files stor data using different property names
+		match ctx.build_mode:
+			BuildMode.DATA:
+				uuid_tag = "uuid"
+				parent_uuid_tag = "parent"
+				pos_tag = "pos"
+				rot_tag = "rot"
+				rot_x_tag = "x"
+				rot_y_tag = "y"
+				rot_z_tag = "z"
+				raw_properties = data["custom"]
+			BuildMode.CROCOTILE:
+				uuid_tag = "id"
+				parent_uuid_tag = "parentID"
+				pos_tag = "position"
+				rot_tag = "rotation"
+				rot_x_tag = "_x"
+				rot_y_tag = "_y"
+				rot_z_tag = "_z"
+				raw_properties = data["properties"]["custom"]
+		
+		# set uuid
+		var raw_uuid: Variant = data[uuid_tag]
+		if typeof(raw_uuid) == TYPE_STRING:
+			self.uuid = raw_uuid
+		else:
+			self.uuid = str(int(raw_uuid))
+		
+		# set parent_uuid
+		var raw_parent: Variant = data[parent_uuid_tag]
+		if raw_parent == null:
 			self.parent_uuid = "null"
+		elif typeof(raw_parent) == TYPE_FLOAT:
+			self.parent_uuid = str(int(raw_parent))
 		else:
 			self.parent_uuid = raw_parent
 		
-		var obj: GatorEntityObject = self.object.get_ref() as GatorEntityObject
-		if obj.entity_type == GatorEntityObject.EntityType.SCENE:
+		# set properties
+		var obj: GatorObject = self.object.get_ref() as GatorObject
+		if obj.entity_type == EntityType.SCENE:
 			var entity_def: GatorEntityDefinition = obj.entity_def.get_ref()
 			
 			self.properties = entity_def.properties.duplicate(true)
-			for raw_property in data["custom"]:
-				var obj_property: GatorEntityProperty = obj.get_property_from_uuid(raw_property["uuid"])
+			for raw_property in raw_properties:
+				var obj_property: GatorProperty = obj.get_property_from_uuid(raw_property["uuid"])
 				self.properties[obj_property.name] = raw_property["value"]
 		else:
 			self.properties = {}
 		
-		var raw_pos_rot: Dictionary = data["pos"]
+		# set pos and rot
+		var raw_pos_rot: Dictionary = data[pos_tag]
 		self.pos = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"])
 		
-		raw_pos_rot = data["rot"]
-		self.rot = Vector3(raw_pos_rot["x"], raw_pos_rot["y"], raw_pos_rot["z"])
-		
-		self.scene = weakref(null)
-		self.keep = self.object.get_ref().entity_type != GatorEntityObject.EntityType.IGNORE
+		raw_pos_rot = data[rot_tag]
+		self.rot = Vector3(
+			raw_pos_rot[rot_x_tag],
+			raw_pos_rot[rot_y_tag],
+			raw_pos_rot[rot_z_tag]
+		)
 
 func build() -> void:
-	var build_progress: float = 0.0
-	var build_steps: Array = [
-		"_free_children",
-		"_parse_object_data",
-		"_create_scene_tree",
-		"_mark_branches_to_keep",
-		"_prune_scene_tree",
-		"_call_build_completed_callbacks"
-	]
+	var ctx: GatorBuildContext = GatorBuildContext.new()
 	
-	if entity_collection.entity_definitions.empty():
+	if entity_collection.entity_definitions.is_empty():
 		printerr("Gator: Entity collection is empty")
-		emit_signal("build_fail")
+		build_fail.emit()
 		return
 	
+	if data_file.ends_with(".crocotile") || data_file.ends_with(".CROCOTILE"):
+		ctx.build_mode = BuildMode.CROCOTILE
+	
+	# build tag map
+	for def in entity_collection.entity_definitions:
+		ctx.tag_map[def.entity_tag] = def
+	
+	var build_steps: Array[Callable] = [
+		_free_children,
+		_extract_json_data,
+		_parse_json_data,
+		_create_scene_tree,
+		_mark_branches_to_keep,
+		_prune_scene_tree,
+		_call_build_completed_callbacks
+	]
+	
+	var build_progress_percentage: float = 0.0
 	for i in build_steps.size():
-		var step: String = build_steps[i]
-		if call(step) == false:
-			emit_signal("build_fail")
+		var step: Callable = build_steps[i]
+		if step.call(ctx) == false:
+			build_fail.emit()
 			return
 		
-		build_progress = (float(i) / build_steps.size()) * 100.0
-		emit_signal("build_progress", build_progress)
-		yield(GatorUtil.idle_frame(self), "timeout")
+		build_progress_percentage = (float(i) / build_steps.size()) * 100.0
+		build_progress.emit(build_progress_percentage)
+		await GatorUtil.idle_frame(self).timeout
 	
-	_clear_buffers()
-	emit_signal("build_success")
+	build_success.emit()
 
-func _clear_buffers() -> void:
-	entity_objects.clear()
-	entity_instances.clear()
-	toplevel_nodes.clear()
-	instances_to_keep.clear()
+####################
+# HELPER FUNCTIONS #
+####################
 
-func _extract_object_data() -> Dictionary:
-	var fp: File = File.new()
-	if fp.open(data_file, File.READ) != OK:
-		printerr("Gator: Failed to open data file \"%s\"" % data_file)
-		return {}
-	
-	var raw_text: String = fp.get_as_text()
-	fp.close()
-	
-	var result: JSONParseResult = JSON.parse(raw_text)
-	if result.error != OK:
-		printerr("Gator: Failed to parse data file \"%s\"" % data_file)
-		return {}
-	
-	return result.result
-
-func _spawn_instance(instance: GatorEntityInstance):
-	var obj: GatorEntityObject = instance.object.get_ref() as GatorEntityObject
+func _spawn_instance(instance: GatorInstance):
+	var obj: GatorObject = instance.object.get_ref() as GatorObject
 	var new_scene
 	
 	match obj.entity_type:
-		GatorEntityObject.EntityType.SCENE:
+		EntityType.SCENE:
 			var entity_def: GatorEntityDefinition = instance.object.get_ref().entity_def.get_ref()
-			new_scene = entity_def.scene.instance()
+			new_scene = entity_def.scene.instantiate()
 			new_scene.name = instance.name
-		GatorEntityObject.EntityType.EMPTY:
-			new_scene = Spatial.new()
+		EntityType.EMPTY:
+			new_scene = Node3D.new()
 			new_scene.name = instance.name
-		GatorEntityObject.EntityType.IGNORE:
-			new_scene = Spatial.new()
+		EntityType.IGNORE:
+			new_scene = Node3D.new()
 			new_scene.name = "%s (ignored)" % instance.name
 	
 	instance.scene = weakref(new_scene)
 	return new_scene
 
-func _free_children() -> bool:
+###############
+# BUILD STEPS #
+###############
+
+func _free_children(ctx: GatorBuildContext) -> bool:
 	for child in get_children():
 		remove_child(child)
 		child.queue_free()
 	
 	return true
 
-func _parse_object_data() -> bool:
-	var data: Dictionary
-	var tag_map: Dictionary = {}
-	
-	data = _extract_object_data()
-	if data.empty():
+func _extract_json_data(ctx: GatorBuildContext) -> bool:
+	var file: FileAccess = FileAccess.open(data_file, FileAccess.READ)
+	if file.get_error() != OK:
+		printerr("Gator: Failed to open data file \"%s\"" % data_file)
 		return false
 	
-	for def in entity_collection.entity_definitions:
-		tag_map[def.entity_tag] = def
+	var raw_text: String = file.get_as_text()
 	
-	for raw_obj in data["objects"]:
-		var obj: GatorEntityObject = GatorEntityObject.new(tag_map, raw_obj, scene_scale)
-		for raw_instance in raw_obj["instances"]:
-			var instance: GatorEntityInstance = GatorEntityInstance.new(weakref(obj), raw_instance)
-			
-			if instance.keep:
-				instances_to_keep.append(instance)
-			
-			entity_instances[instance.uuid] = instance
-		
-		entity_objects.append(obj)
+	var json_parser: JSON = JSON.new()
+	if json_parser.parse(raw_text) != OK:
+		printerr("Gator: Failed to parse data file \"%s\"" % data_file)
+		return false
+	
+	ctx.json_data = json_parser.data
 	
 	return true
 
-func _create_scene_tree() -> bool:
-	for instance in entity_instances.values():
+func _parse_json_data(ctx: GatorBuildContext) -> bool:
+	var objects_tag: String
+	
+	match ctx.build_mode:
+		BuildMode.DATA:
+			objects_tag = "objects"
+		BuildMode.CROCOTILE:
+			objects_tag = "prefabs"
+	
+	var objects: Array = ctx.json_data[objects_tag]
+	for raw_obj in objects:
+		if raw_obj.has("type") && raw_obj["type"] == "instance":
+			continue
+		
+		var obj: GatorObject = GatorObject.new(ctx, raw_obj, scene_scale)
+		
+		for raw_instance in raw_obj["instances"]:
+			var instance: GatorInstance = GatorInstance.new(ctx, weakref(obj), raw_instance)
+			
+			if instance.keep:
+				ctx.instances_to_keep.append(instance)
+			
+			ctx.entity_instances[instance.uuid] = instance
+		
+		ctx.entity_objects.append(obj)
+	
+	if ctx.build_mode == BuildMode.CROCOTILE:
+		# toplevel instances have parent_uuids pointing to invalid objects,
+		# replace them with "null"
+		for instance in ctx.entity_instances.values():
+			if !ctx.entity_instances.has(instance.parent_uuid):
+				instance.parent_uuid = "null"
+	
+	return true
+
+func _create_scene_tree(ctx: GatorBuildContext) -> bool:
+	for instance in ctx.entity_instances.values():
 		# create this instance if it doesn't exist already
 		var scene = instance.scene.get_ref()
 		if scene == null:
@@ -239,7 +327,7 @@ func _create_scene_tree() -> bool:
 		
 		# instance parent (if needed), then add current instance as a child
 		if instance.parent_uuid != "null":
-			var parent: GatorEntityInstance = entity_instances[instance.parent_uuid]
+			var parent: GatorInstance = ctx.entity_instances[instance.parent_uuid]
 			var parent_scene = parent.scene.get_ref()
 			
 			if parent_scene == null:
@@ -248,20 +336,20 @@ func _create_scene_tree() -> bool:
 			parent_scene.add_child(scene)
 		else:
 			add_child(scene)
-			toplevel_nodes.append(scene)
+			ctx.toplevel_nodes.append(scene)
 		
 		scene.set_meta("gt_instance", instance)
 		
-		if scene is Spatial:
+		if scene is Node3D:
 			if use_global_origin:
 				if instance.parent_uuid == "null":
-					scene.global_translation = instance.pos * scene_scale
+					scene.global_position = instance.pos * scene_scale
 					scene.global_rotation = instance.rot
 				else:
-					scene.translation = instance.pos * scene_scale
+					scene.position = instance.pos * scene_scale
 					scene.rotation = instance.rot
 			else:
-				scene.translation = instance.pos * scene_scale
+				scene.position = instance.pos * scene_scale
 				scene.rotation = instance.rot
 		
 		if "properties" in scene:
@@ -272,12 +360,12 @@ func _create_scene_tree() -> bool:
 	
 	return true
 
-func _mark_branches_to_keep() -> bool:
-	for instance in instances_to_keep:
-		var prev: GatorEntityInstance = instance as GatorEntityInstance
+func _mark_branches_to_keep(ctx: GatorBuildContext) -> bool:
+	for instance in ctx.instances_to_keep:
+		var prev: GatorInstance = instance as GatorInstance
 		var parent_uuid = instance.parent_uuid
 		while parent_uuid != "null":
-			var parent: GatorEntityInstance = entity_instances[parent_uuid]
+			var parent: GatorInstance = ctx.entity_instances[parent_uuid]
 			
 			if prev.keep:
 				parent.keep = true
@@ -286,43 +374,46 @@ func _mark_branches_to_keep() -> bool:
 			parent_uuid = parent.parent_uuid
 	return true
 
-func _prune_scene_tree() -> bool:
+func _prune_scene_tree(ctx: GatorBuildContext) -> bool:
 	var edited_root = get_tree().edited_scene_root
 	var node_stack: Array = []
 	
-	if toplevel_nodes.empty(): # sanity check, maybe not needed?
+	if ctx.toplevel_nodes.is_empty(): # sanity check, maybe not needed?
 		return true
 	
-	for i in range(toplevel_nodes.size() - 1, -1, -1): # iterate backwards to allow removal
-		var top_node = toplevel_nodes[i]
+	for i in range(ctx.toplevel_nodes.size() - 1, -1, -1): # iterate backwards to allow removal
+		var top_node = ctx.toplevel_nodes[i]
 		node_stack.append(top_node)
-		while !node_stack.empty():
+		while !node_stack.is_empty():
 			var current = node_stack.pop_back()
-			var instance: GatorEntityInstance = current.get_meta("gt_instance") as GatorEntityInstance
+			var keep: bool = true
 			
-			current.remove_meta("gt_instance")
+			if current.has_meta("gt_instance"):
+				var instance: GatorInstance = current.get_meta("gt_instance") as GatorInstance
+				keep = instance.keep
+				current.remove_meta("gt_instance")
 			
-			if instance.keep:
+			if keep:
 				current.owner = edited_root
 			
 				if current.get_child_count() > 0:
 					var children: Array = current.get_children()
-					children.invert()
+					children.reverse()
 					node_stack.append_array(children)
 			else:
 				if current == top_node:
-					toplevel_nodes.remove(i)
+					ctx.toplevel_nodes.remove_at(i)
 				current.get_parent().remove_child(current)
 				current.queue_free()
 	
 	return true
 
-func _call_build_completed_callbacks() -> bool:
+func _call_build_completed_callbacks(ctx: GatorBuildContext) -> bool:
 	var edited_root = get_tree().edited_scene_root
 	var node_stack: Array = []
-	for node in toplevel_nodes:
+	for node in ctx.toplevel_nodes:
 		node_stack.append(node)
-		while !node_stack.empty():
+		while !node_stack.is_empty():
 			var current = node_stack.pop_back()
 			
 			var script = current.get_script()
@@ -331,7 +422,7 @@ func _call_build_completed_callbacks() -> bool:
 			
 			if current.get_child_count() > 0:
 				var children: Array = current.get_children()
-				children.invert()
+				children.reverse()
 				node_stack.append_array(children)
 	
 	return true

@@ -1,20 +1,20 @@
-tool
+@tool
 extends EditorPlugin
 
 var gator_scene_controls: Control = null
 var build_progress_bar: WeakRef = weakref(null)
 var edited_object_ref: WeakRef = weakref(null)
 
-func get_plugin_name() -> String:
+func _get_plugin_name() -> String:
 	return "Gator"
 
-func handles(object: Object) -> bool:
+func _handles(object: Variant) -> bool:
 	return object is GatorScene
 
-func edit(object: Object) -> void:
+func _edit(object: Variant) -> void:
 	edited_object_ref = weakref(object)
 
-func make_visible(visible: bool) -> void:
+func _make_visible(visible: bool) -> void:
 	if gator_scene_controls:
 		gator_scene_controls.set_visible(visible)
 
@@ -32,12 +32,13 @@ func _exit_tree():
 func create_gator_scene_controls() -> Control:
 	var separator: VSeparator = VSeparator.new()
 
-	var build_button: ToolButton = ToolButton.new()
+	var build_button: Button = Button.new()
+	build_button.flat = true
 	build_button.text = "Build"
-	build_button.connect("pressed", self, "build_gator_scene")
+	build_button.pressed.connect(build_gator_scene)
 	
 	var progress_bar: ProgressBar = ProgressBar.new()
-	progress_bar.rect_min_size = Vector2(100, 0)
+	progress_bar.custom_minimum_size = Vector2(100, 0)
 	progress_bar.rounded = true
 	progress_bar.set_visible(false)
 	build_progress_bar = weakref(progress_bar)
@@ -54,40 +55,42 @@ func disable_gator_scene_controls(disable: bool) -> void:
 		return
 
 	for child in gator_scene_controls.get_children():
-		if child is ToolButton:
+		if child is Button:
 			child.set_disabled(disable)
 
 func build_gator_scene() -> void:
-	var edited_object = edited_object_ref.get_ref()
+	var edited_object: Variant = edited_object_ref.get_ref()
 	if !edited_object:
 		return
-
+	
 	if !(edited_object is GatorScene):
 		return
 	
+	var gator_scene: GatorScene = edited_object as GatorScene
+	
 	disable_gator_scene_controls(true)
 	
-	var progress_bar: ProgressBar = build_progress_bar.get_ref()
+	var progress_bar: ProgressBar = build_progress_bar.get_ref() as ProgressBar
 	progress_bar.set_visible(true)
 	progress_bar.value = 0.0
 	
-	edited_object.connect("build_progress", self, "on_build_progress")
-	edited_object.connect("build_success", self, "on_build_success", [edited_object])
-	edited_object.connect("build_fail", self, "on_build_fail", [edited_object])
+	gator_scene.build_progress.connect(on_build_progress)
+	gator_scene.build_success.connect(on_build_success.bind(gator_scene))
+	gator_scene.build_fail.connect(on_build_fail.bind(gator_scene))
 	
-	print("Building %s..." % edited_object.data_file)
+	print("Building %s..." % gator_scene.data_file)
 	
-	edited_object.build()
+	gator_scene.build()
 
 func disconnect_gator_scene(gator_scene: GatorScene) -> void:
-	if gator_scene.is_connected("build_progress", self, "on_build_progress"):
-		gator_scene.disconnect("build_progress", self, "on_build_progress")
+	if gator_scene.build_progress.is_connected(on_build_progress):
+		gator_scene.build_progress.disconnect(on_build_progress)
 	
-	if gator_scene.is_connected("build_success", self, "on_build_success"):
-		gator_scene.disconnect("build_success", self, "on_build_success")
+	if gator_scene.build_success.is_connected(on_build_success):
+		gator_scene.build_success.disconnect(on_build_success)
 	
-	if gator_scene.is_connected("build_fail", self, "on_build_fail"):
-		gator_scene.disconnect("build_fail", self, "on_build_fail")
+	if gator_scene.build_fail.is_connected(on_build_fail):
+		gator_scene.build_fail.disconnect(on_build_fail)
 
 func on_build_progress(progress: float) -> void:
 	var progress_bar: ProgressBar = build_progress_bar.get_ref()

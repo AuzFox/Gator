@@ -1,5 +1,5 @@
-extends Reference
 class_name GatorUtil
+extends RefCounted
 
 class GatorFrameTimer extends Node:
 	signal timeout
@@ -10,13 +10,13 @@ class GatorFrameTimer extends Node:
 		self.frames = frames
 	
 	func _ready() -> void:
-		get_tree().connect("idle_frame", self, "on_idle_frame")
+		get_tree().process_frame.connect(on_idle_frame)
 	
 	func on_idle_frame() -> void:
 		self.frames -= 1
 		
 		if self.frames == 0:
-			emit_signal("timeout")
+			timeout.emit()
 			queue_free()
 
 static func idle_frame(node: Node, frames: int = 1) -> GatorFrameTimer:
