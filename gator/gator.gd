@@ -8,10 +8,10 @@ var edited_object_ref: WeakRef = weakref(null)
 func get_plugin_name() -> String:
 	return "Gator"
 
-func handles(object: Object) -> bool:
+func handles(object) -> bool:
 	return object is GatorScene
 
-func edit(object: Object) -> void:
+func edit(object) -> void:
 	edited_object_ref = weakref(object)
 
 func make_visible(visible: bool) -> void:
@@ -32,7 +32,8 @@ func _exit_tree():
 func create_gator_scene_controls() -> Control:
 	var separator: VSeparator = VSeparator.new()
 
-	var build_button: ToolButton = ToolButton.new()
+	var build_button: Button = Button.new()
+	build_button.flat = true
 	build_button.text = "Build"
 	build_button.connect("pressed", self, "build_gator_scene")
 	
@@ -54,30 +55,32 @@ func disable_gator_scene_controls(disable: bool) -> void:
 		return
 
 	for child in gator_scene_controls.get_children():
-		if child is ToolButton:
+		if child is Button:
 			child.set_disabled(disable)
 
 func build_gator_scene() -> void:
 	var edited_object = edited_object_ref.get_ref()
 	if !edited_object:
 		return
-
+	
 	if !(edited_object is GatorScene):
 		return
 	
+	var gator_scene: GatorScene = edited_object as GatorScene
+	
 	disable_gator_scene_controls(true)
 	
-	var progress_bar: ProgressBar = build_progress_bar.get_ref()
+	var progress_bar: ProgressBar = build_progress_bar.get_ref() as ProgressBar
 	progress_bar.set_visible(true)
 	progress_bar.value = 0.0
 	
-	edited_object.connect("build_progress", self, "on_build_progress")
-	edited_object.connect("build_success", self, "on_build_success", [edited_object])
-	edited_object.connect("build_fail", self, "on_build_fail", [edited_object])
+	gator_scene.connect("build_progress", self, "on_build_progress")
+	gator_scene.connect("build_success", self, "on_build_success", [gator_scene])
+	gator_scene.connect("build_fail", self, "on_build_fail", [gator_scene])
 	
-	print("Building %s..." % edited_object.data_file)
+	print("Building %s..." % gator_scene.data_file)
 	
-	edited_object.build()
+	gator_scene.build()
 
 func disconnect_gator_scene(gator_scene: GatorScene) -> void:
 	if gator_scene.is_connected("build_progress", self, "on_build_progress"):

@@ -1,6 +1,6 @@
 # Gator
 
-Crocotile3D Custom Object Data Importer for Godot 3.
+Crocotile3D Custom Object Data Importer for Godot.
 
 ## Overview
 
