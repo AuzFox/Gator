@@ -1,6 +1,6 @@
 # Gator
 
-Crocotile3D Custom Object Data Importer for Godot.
+Crocotile3D Scene Importer Plugin for Godot.
 
 ## Overview
 
@@ -9,6 +9,7 @@ Gator is a plugin for Godot imports the custom data defined on Crocotile3D objec
 ## Features
 
 - Recreate Crocotile3D scenes in Godot
+    - Import geometry from the Crocotile3D scene
     - Use Crocotile3D objects as placeholders for Godot scenes/nodes
     - Crocotile3D's object heirarchy is preserved when instancing scenes
 - Import custom object properties and use them in Godot scripts
