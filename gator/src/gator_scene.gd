@@ -468,7 +468,7 @@ func _get_property_list() -> Array:
 		GatorUtil.property("scene_scale", TYPE_FLOAT),
 		GatorUtil.property("use_global_origin", TYPE_BOOL),
 		GatorUtil.property("textures_directory", TYPE_STRING, PROPERTY_HINT_GLOBAL_DIR),
-		GatorUtil.property("default_material", TYPE_OBJECT, PROPERTY_HINT_RESOURCE_TYPE, "Material"),
+		GatorUtil.property("default_material", TYPE_OBJECT, PROPERTY_HINT_RESOURCE_TYPE, "Material")
 	]
 	
 	if default_material != null && default_material is ShaderMaterial:
@@ -862,7 +862,7 @@ func _call_build_completed_callbacks(ctx: GatorBuildContext) -> bool:
 			var current = node_stack.pop_back()
 			
 			var script = current.get_script()
-			if script && (!Engine.editor_hint || script.is_tool()) && current.has_method("_on_build_completed"):
+			if script && (!Engine.is_editor_hint() || script.is_tool()) && current.has_method("_on_build_completed"):
 				current._on_build_completed()
 			
 			if current.get_child_count() > 0:
