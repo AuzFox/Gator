@@ -51,11 +51,29 @@ static func array_swap(array: Array, a: int, b: int) -> void:
 	array[b] = temp
 
 static func load_texture_data(raw_texture: String, texture_flags: int):
-	var start: int = raw_texture.find(",")
-	raw_texture = raw_texture.substr(start + 1)
-	var texture_bin: PoolByteArray = Marshalls.base64_to_raw(raw_texture)
+	var data_start: int = raw_texture.find(",")
+	var ext_start: int = raw_texture.find("/")
+	var ext_end: int = raw_texture.find(";")
+	var texture_ext: String = raw_texture.substr(ext_start + 1, ext_end - ext_start - 1)
+	var texture_bin: PoolByteArray = Marshalls.base64_to_raw(raw_texture.substr(data_start + 1))
 	var image: Image = Image.new()
-	var result: int = image.load_png_from_buffer(texture_bin)
+	var result: int
+	
+	match texture_ext:
+		"png":
+			result = image.load_png_from_buffer(texture_bin)
+		"jpg":
+			result = image.load_jpg_from_buffer(texture_bin)
+		"webp":
+			result = image.load_webp_from_buffer(texture_bin)
+		"tga":
+			result = image.load_tga_from_buffer(texture_bin)
+		"bmp":
+			result = image.load_bmp_from_buffer(texture_bin)
+		_:
+			printerr("Gator: Unsupported image format \"%s\"", texture_ext)
+			return null
+	
 	if result == OK:
 		var tex: ImageTexture = ImageTexture.new()
 		tex.create_from_image(image, texture_flags)
