@@ -469,11 +469,12 @@ func _get_property_list() -> Array:
 		GatorUtil.property("use_global_origin", TYPE_BOOL),
 		GatorUtil.property("textures_directory", TYPE_STRING, PROPERTY_HINT_GLOBAL_DIR),
 		GatorUtil.property("default_material", TYPE_OBJECT, PROPERTY_HINT_RESOURCE_TYPE, "Material"),
-		GatorUtil.property("scene_geometry_flags", TYPE_INT, PROPERTY_HINT_FLAGS, "Visual,Collision")
 	]
 	
 	if default_material != null && default_material is ShaderMaterial:
 		p.append(GatorUtil.property("default_albedo_uniform", TYPE_STRING))
+	
+	p.append(GatorUtil.property("scene_geometry_flags", TYPE_INT, PROPERTY_HINT_FLAGS, "Visual,Collision"))
 	
 	if scene_geometry_flags & GatorUtil.GeometryFlag.COLLISION:
 		p.append(GatorUtil.property("scene_collision_shape", TYPE_INT, PROPERTY_HINT_ENUM, "Convex,Concave"))
