@@ -19,16 +19,16 @@ var entity_collection: GatorEntityCollection:
 		update_configuration_warnings()
 var scene_scale: float = 1.0
 var use_global_origin: bool = false
-var scene_geometry_flags: int = 0:
-	set(value):
-		scene_geometry_flags = value
-		notify_property_list_changed()
 var textures_directory: String = ""
 var default_material: Material = null:
 	set(value):
 		default_material = value
 		notify_property_list_changed()
 var default_albedo_uniform: String = ""
+var scene_geometry_flags: int = 0:
+	set(value):
+		scene_geometry_flags = value
+		notify_property_list_changed()
 var scene_collision_shape: GatorUtil.CollisionShape = GatorUtil.CollisionShape.CONCAVE
 var scene_collision_type: GatorUtil.CollisionType = GatorUtil.CollisionType.STATICBODY
 
@@ -467,14 +467,14 @@ func _get_property_list() -> Array:
 		GatorUtil.property("entity_collection", TYPE_OBJECT, PROPERTY_HINT_RESOURCE_TYPE, "GatorEntityCollection"),
 		GatorUtil.property("scene_scale", TYPE_FLOAT),
 		GatorUtil.property("use_global_origin", TYPE_BOOL),
+		GatorUtil.property("textures_directory", TYPE_STRING, PROPERTY_HINT_GLOBAL_DIR),
+		GatorUtil.property("default_material", TYPE_OBJECT, PROPERTY_HINT_RESOURCE_TYPE, "Material"),
 		GatorUtil.property("scene_geometry_flags", TYPE_INT, PROPERTY_HINT_FLAGS, "Visual,Collision")
 	]
 	
-	if scene_geometry_flags & GatorUtil.GeometryFlag.VISUAL:
-		p.append(GatorUtil.property("textures_directory", TYPE_STRING, PROPERTY_HINT_GLOBAL_DIR))
-		p.append(GatorUtil.property("default_material", TYPE_OBJECT, PROPERTY_HINT_RESOURCE_TYPE, "Material"))
-		if default_material != null && default_material is ShaderMaterial:
-			p.append(GatorUtil.property("default_albedo_uniform", TYPE_STRING))
+	if default_material != null && default_material is ShaderMaterial:
+		p.append(GatorUtil.property("default_albedo_uniform", TYPE_STRING))
+	
 	if scene_geometry_flags & GatorUtil.GeometryFlag.COLLISION:
 		p.append(GatorUtil.property("scene_collision_shape", TYPE_INT, PROPERTY_HINT_ENUM, "Convex,Concave"))
 		p.append(GatorUtil.property("scene_collision_type", TYPE_INT, PROPERTY_HINT_ENUM, "StaticBody3D,Area3D,RigidBody3D,CharacterBody3D"))
@@ -523,7 +523,7 @@ func build() -> void:
 # HELPER FUNCTIONS #
 ####################
 
-func _position_node(node: Node3D, is_toplevel: bool, pos: Vector3, rot: Vector3) -> void:
+func _position_node(node, is_toplevel: bool, pos: Vector3, rot: Vector3) -> void:
 	if node == null:
 		return
 	
@@ -727,8 +727,7 @@ func _parse_json_data(ctx: GatorBuildContext) -> bool:
 			
 			var models: Array = ctx.json_data["model"]
 			for model in models:
-				if scene_geometry_flags & GatorUtil.GeometryFlag.VISUAL:
-					ctx.tilesets.append(GatorTileset.new(model))
+				ctx.tilesets.append(GatorTileset.new(model))
 				
 				for raw_tile in model["object"]:
 					var tile: GatorTileMesh = GatorTileMesh.new(raw_tile, scene_scale)
