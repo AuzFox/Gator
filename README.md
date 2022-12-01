@@ -1,6 +1,6 @@
 # Gator
 
-Crocotile3D Scene Importer plugin for Godot.
+Crocotile3D Scene Importer Plugin for Godot.
 
 ## Overview
 
